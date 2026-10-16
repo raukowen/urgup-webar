@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#090d16">
+  <title>Ürgüp Meydanı WebAR - Host & Küratör Yönetici Stüdyosu</title>
+  
+  <link rel="stylesheet" href="assets/css/style.css">
+  
+  <!-- Three.js & GLTFLoader & OrbitControls -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  
+  <!-- QR Generator & Library & Admin Logic -->
+  <script src="assets/js/qrcode-generator.js"></script>
+  <script src="assets/js/sculpture-library.js"></script>
+  <script src="assets/js/host-admin.js"></script>
+</head>
+<body style="overflow-y: auto;">
+
+  <div class="admin-container">
+    
+    <!-- Üst Yönetici Başlığı -->
+    <header class="top-bar interactive" style="margin-bottom: 24px;">
+      <div class="brand-badge">
+        <div class="brand-logo-icon" style="background: linear-gradient(135deg, #38bdf8, #0284c7); color: #fff;">HQ</div>
+        <div>
+          <h1 class="brand-title">ÜRGÜP MEYDANI // HOST STÜDYOSU</h1>
+          <p class="brand-sub">Heykel Yerleşim, GLB Yönetimi & QR Baskı Merkezi</p>
+        </div>
+      </div>
+
+      <div class="top-actions">
+        <!-- Turist Sayfasına Dönüş -->
+        <a href="index.html" class="icon-btn gold-highlight" style="text-decoration: none;">
+          <span>📱 Turist AR Görünümü</span>
+        </a>
+      </div>
+    </header>
+
+    <!-- 2 Sütunlu Yönetim Izgarası -->
+    <div class="admin-grid">
+      
+      <!-- SOL SÜTUN: 3D MODEL ÖNİZLEME & HEYKEL YÖNETİMİ -->
+      <section class="admin-card">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h2 style="font-size: 16px; font-weight: 700; color: #fff;">🏛️ Sergi Heykelleri & 3D Önizleme</h2>
+          <button id="btn-export-json" class="icon-btn" title="Ayarları İndir">💾 JSON Dışa Aktar</button>
+        </div>
+
+        <!-- 3D Önizleme Canvas'ı -->
+        <div style="position: relative;">
+          <canvas id="admin-preview-canvas"></canvas>
+          <div style="position: absolute; bottom: 10px; right: 10px; background: rgba(0,0,0,0.6); padding: 4px 10px; border-radius: 6px; font-size: 11px; color: var(--primary-gold);">
+            🖱️ Sol Tık: Çevir | Sağ Tık: Kaydır | Tekerlek: Zoom
+          </div>
+        </div>
+
+        <!-- Heykel Seçici Dropdown -->
+        <div class="form-group">
+          <label class="form-label">İncelenen Heykel:</label>
+          <select id="select-active-sculpture" class="form-select">
+            <!-- JS ile doldurulacak -->
+          </select>
+        </div>
+
+        <!-- Seçili Heykel Detayları -->
+        <div id="active-sculpture-details" style="background: rgba(0,0,0,0.25); border-radius: var(--radius-sm); padding: 12px; font-size: 13px; line-height: 1.6;">
+          <p><strong>Sanatçı:</strong> <span id="dt-artist" style="color: var(--primary-gold);"></span></p>
+          <p><strong>Kategori:</strong> <span id="dt-category"></span></p>
+          <p><strong>Açıklama:</strong> <span id="dt-desc" style="color: var(--text-muted);"></span></p>
+          <p><strong>Ölçek:</strong> <span id="dt-scale">1.0x</span></p>
+        </div>
+
+        <hr style="border: none; border-top: 1px solid var(--border-glass);">
+
+        <!-- YENİ GLB MODEL YÜKLEME ALANI -->
+        <h3 style="font-size: 14px; font-weight: 700; color: #fff;">➕ Meydana Yeni 3D Model Ekle (.GLB / .GLTF)</h3>
+        
+        <div id="dropzone" class="file-dropzone">
+          <span style="font-size: 28px;">📦</span>
+          <p style="font-size: 13px; font-weight: 600; color: #fff; margin-top: 6px;">
+            GLB veya GLTF Model Dosyasını Buraya Sürükleyin
+          </p>
+          <p style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">
+            veya bilgisayarınızdan dosya seçmek için tıklayın
+          </p>
+          <input type="file" id="file-input-glb" accept=".glb,.gltf" style="display: none;">
+        </div>
+
+        <!-- Model Bilgi Formu -->
+        <div class="form-group">
+          <label class="form-label">Heykel / Eser Adı (Türkçe):</label>
+          <input type="text" id="input-model-name" class="form-input" placeholder="Örn: Kapadokya Güneş Saati">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Heykel Adı (İngilizce - Turistler İçin):</label>
+          <input type="text" id="input-model-name-en" class="form-input" placeholder="Örn: Cappadocia Sundial">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Sanatçı / Tasarımcı:</label>
+          <input type="text" id="input-model-artist" class="form-input" placeholder="Örn: Ra Studio">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Eser Açıklaması & Meydan Hikayesi:</label>
+          <textarea id="input-model-desc" class="form-textarea" rows="2" placeholder="Turistlerin meydanda göreceği heykelin hikayesi..."></textarea>
+        </div>
+
+        <button id="btn-submit-model" class="primary-btn" style="width: 100%;">
+          <span>✨ Modeli Sergide Yayınla</span>
+        </button>
+      </section>
+
+      <!-- SAĞ SÜTUN: QR KOD BASKI STÜDYOSU & YAYINLAMA -->
+      <section class="admin-card">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h2 style="font-size: 16px; font-weight: 700; color: #fff;">🖨️ Ürgüp Meydanı QR Baskı Stüdyosu</h2>
+          <span style="font-size: 12px; color: var(--primary-gold); font-weight: 600;">Print-Ready</span>
+        </div>
+
+        <p style="font-size: 13px; color: var(--text-muted);">
+          Bu stüdyo, Ürgüp Meydanı'ndaki fiziksel tabelalar, heykel kaideleri veya broşürler için yüksek çözünürlüklü QR kodlar üretir. Turistler telefonlarıyla bu kodu okuttuğunda doğrudan tarayıcı üzerinden AR sergisine bağlanır.
+        </p>
+
+        <!-- QR Ayarları Formu -->
+        <div class="form-group">
+          <label class="form-label">QR Kod Hedefi:</label>
+          <select id="qr-target-type" class="form-select">
+            <option value="all">Tüm Sergi Ana Girişi (Ürgüp Meydanı Açık Hava Sergisi)</option>
+            <!-- Heykel bazlı derin linkler dinamik eklenecek -->
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Host / Yayın URL Adresi:</label>
+          <input type="text" id="qr-host-url" class="form-input" placeholder="https://urgup-meydan.vercel.app veya yerel IP">
+          <small style="color: #64748b; font-size: 11px; margin-top: 2px;">
+            * Otomatik olarak mevcut tarayıcı adresi algılandı. Yayına aldığınızda canlı domaininizi yazabilirsiniz.
+          </small>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">QR Tabela Başlığı:</label>
+          <input type="text" id="qr-title-text" class="form-input" value="ÜRGÜP MEYDANI DİJİTAL SERGİSİ">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Alt Yönlendirme Metni:</label>
+          <input type="text" id="qr-sub-text" class="form-input" value="Telefonunuzun Kamerasını Doğrultun">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Renk Teması:</label>
+          <select id="qr-color-theme" class="form-select">
+            <option value="#0f172a">Obsidyen Siyahı & Altın Vurgu (Standart)</option>
+            <option value="#854d0e">Kapadokya Pişmiş Toprak / Bronz</option>
+            <option value="#1e1b4b">Gece Mahzeni & Biyo-Mavi</option>
+          </select>
+        </div>
+
+        <!-- Canlı QR Önizleme Kutusu -->
+        <div id="qr-preview-container">
+          <img id="qr-preview-img" alt="Ürgüp Meydanı AR QR Kodu">
+          <p id="qr-url-display" style="font-size: 11px; color: var(--text-muted); word-break: break-all; text-align: center; max-width: 320px;"></p>
+        </div>
+
+        <!-- Butonlar: İndir & Yazdır -->
+        <div style="display: flex; gap: 10px;">
+          <button id="btn-download-qr" class="primary-btn" style="flex: 1;">
+            <span>💾 QR Görselini İndir (PNG)</span>
+          </button>
+          <button id="btn-print-qr" class="secondary-btn" style="flex: 1;">
+            <span>🖨️ Tabela Yazdır</span>
+          </button>
+        </div>
+
+        <hr style="border: none; border-top: 1px solid var(--border-glass);">
+
+        <!-- CANLI YAYINA ALMA REHBERİ -->
+        <div style="background: rgba(245, 158, 11, 0.08); border-left: 3px solid var(--primary-gold); padding: 12px; border-radius: 6px; font-size: 12px; line-height: 1.6;">
+          <h4 style="color: #fff; font-size: 13px; font-weight: 700; margin-bottom: 4px;">🚀 Meydanda Turistlere Sunmak İçin Yayına Alma (1 Dakika):</h4>
+          <ol style="margin-left: 18px; color: #cbd5e1;">
+            <li>Bu klasörü <strong>Vercel, Netlify veya GitHub Pages</strong> üzerine yükleyin (Ücretsiz ve otomatik HTTPS sağlar).</li>
+            <li>Yukarıdaki <em>Host / Yayın URL Adresi</em> kutusuna canlı bağlantınızı yapıştırın.</li>
+            <li>Oluşan QR kodunu indirip Ürgüp Meydanı'ndaki fiziksel standa veya heykel kaidesine yerleştirin!</li>
+          </ol>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast-msg"></div>
+
+  <!-- ==========================================================================
+       HOST STUDYO SCRIPT
+       ========================================================================== -->
+  <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+      const sculptureLib = new SculptureLibrary();
+      const adminStudio = new HostAdminStudio(sculptureLib);
+
+      const previewCanvas = document.getElementById('admin-preview-canvas');
+      adminStudio.initPreviewViewport(previewCanvas);
+
+      // UI Elementleri
+      const selectSculpture = document.getElementById('select-active-sculpture');
+      const dtArtist = document.getElementById('dt-artist');
+      const dtCategory = document.getElementById('dt-category');
+      const dtDesc = document.getElementById('dt-desc');
+      const dtScale = document.getElementById('dt-scale');
+      const btnExport = document.getElementById('btn-export-json');
+
+      const dropzone = document.getElementById('dropzone');
+      const fileInput = document.getElementById('file-input-glb');
+      const inputName = document.getElementById('input-model-name');
+      const inputNameEN = document.getElementById('input-model-name-en');
+      const inputArtist = document.getElementById('input-model-artist');
+      const inputDesc = document.getElementById('input-model-desc');
+      const btnSubmitModel = document.getElementById('btn-submit-model');
+
+      const qrTargetType = document.getElementById('qr-target-type');
+      const qrHostUrl = document.getElementById('qr-host-url');
+      const qrTitleText = document.getElementById('qr-title-text');
+      const qrSubText = document.getElementById('qr-sub-text');
+      const qrColorTheme = document.getElementById('qr-color-theme');
+      const qrPreviewImg = document.getElementById('qr-preview-img');
+      const qrUrlDisplay = document.getElementById('qr-url-display');
+      const btnDownloadQR = document.getElementById('btn-download-qr');
+      const btnPrintQR = document.getElementById('btn-print-qr');
+      const toast = document.getElementById('toast');
+
+      let currentQRResult = null;
+      let pendingUploadedFile = null;
+
+      function showToast(msg) {
+        toast.textContent = msg;
+        toast.classList.add('show');
+        setTimeout(() => toast.classList.remove('show'), 2600);
+      }
+
+      // Varsayılan Host URL'ini mevcut sayfanın index.html adresine ayarla
+      const defaultHost = window.location.href.replace('admin.html', 'index.html').split('?')[0];
+      qrHostUrl.value = defaultHost;
+
+      // Heykel Seçici Dropdown'u Doldur
+      function populateSculptureSelect() {
+        selectSculpture.innerHTML = '';
+        qrTargetType.innerHTML = '<option value="all">📍 Tüm Sergi Ana Girişi (Ürgüp Meydanı)</option>';
+
+        sculptureLib.getAll().forEach(s => {
+          const opt = document.createElement('option');
+          opt.value = s.id;
+          opt.textContent = `${s.name} (${s.artist})`;
+          selectSculpture.appendChild(opt);
+
+          const qrOpt = document.createElement('option');
+          qrOpt.value = s.id;
+          qrOpt.textContent = `🗿 Doğrudan: ${s.name}`;
+          qrTargetType.appendChild(qrOpt);
+        });
+
+        updateSculptureDetails(selectSculpture.value);
+      }
+
+      function updateSculptureDetails(id) {
+        const item = sculptureLib.getById(id);
+        if (!item) return;
+        dtArtist.textContent = item.artist;
+        dtCategory.textContent = item.category;
+        dtDesc.textContent = item.description;
+        dtScale.textContent = (item.defaultScale || 1.0) + 'x';
+        adminStudio.loadPreviewSculpture(id);
+      }
+
+      selectSculpture.addEventListener('change', () => {
+        updateSculptureDetails(selectSculpture.value);
+      });
+
+      populateSculptureSelect();
+
+      // JSON Dışa Aktarma
+      btnExport.addEventListener('click', () => {
+        adminStudio.exportConfigJSON();
+        showToast('Sergi konfigürasyonu indirildi.');
+      });
+
+      // Dosya Seçme / Sürükleme
+      dropzone.addEventListener('click', () => fileInput.click());
+      dropzone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropzone.style.borderColor = '#38bdf8';
+      });
+      dropzone.addEventListener('dragleave', () => {
+        dropzone.style.borderColor = 'var(--border-gold)';
+      });
+      dropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropzone.style.borderColor = 'var(--border-gold)';
+        if (e.dataTransfer.files.length > 0) {
+          handleFile(e.dataTransfer.files[0]);
+        }
+      });
+      fileInput.addEventListener('change', () => {
+        if (fileInput.files.length > 0) {
+          handleFile(fileInput.files[0]);
+        }
+      });
+
+      function handleFile(file) {
+        if (!file.name.match(/\.(glb|gltf)$/i)) {
+          showToast('Lütfen sadece .glb veya .gltf 3D model dosyası seçin.');
+          return;
+        }
+        pendingUploadedFile = file;
+        const baseName = file.name.replace(/\.[^/.]+$/, '');
+        inputName.value = baseName;
+        inputNameEN.value = baseName;
+        dropzone.querySelector('p').textContent = `✅ Seçildi: ${file.name} (${(file.size / (1024*1024)).toFixed(1)} MB)`;
+        showToast('3D Dosya seçildi. Yayınlamak için butona basın.');
+      }
+
+      // Modeli Kaydet & Yayınla
+      btnSubmitModel.addEventListener('click', async () => {
+        if (!pendingUploadedFile) {
+          showToast('Lütfen önce bir .glb dosyası seçin.');
+          return;
+        }
+
+        try {
+          btnSubmitModel.disabled = true;
+          btnSubmitModel.textContent = '⏳ Model İşleniyor...';
+
+          const newEntry = await adminStudio.handleFileUpload(pendingUploadedFile, {
+            name: inputName.value.trim() || pendingUploadedFile.name,
+            nameEN: inputNameEN.value.trim() || inputName.value.trim(),
+            artist: inputArtist.value.trim() || 'Ürgüp Misafir Sanatçısı',
+            description: inputDesc.value.trim() || 'Host tarafından eklenen 3D heykel.'
+          });
+
+          adminStudio.saveToLocalStorage();
+          populateSculptureSelect();
+          selectSculpture.value = newEntry.id;
+          updateSculptureDetails(newEntry.id);
+
+          pendingUploadedFile = null;
+          inputName.value = '';
+          inputNameEN.value = '';
+          inputDesc.value = '';
+          dropzone.querySelector('p').textContent = 'GLB veya GLTF Model Dosyasını Buraya Sürükleyin';
+
+          showToast('🎉 Yeni heykel sergiye başarıyla eklendi!');
+          refreshQR();
+        } catch (e) {
+          console.error(e);
+          showToast('Model yüklenirken hata oluştu: ' + e.message);
+        } finally {
+          btnSubmitModel.disabled = false;
+          btnSubmitModel.textContent = '✨ Modeli Sergide Yayınla';
+        }
+      });
+
+      // QR Kod Yenileme
+      async function refreshQR() {
+        const targetId = qrTargetType.value;
+        const color = qrColorTheme.value;
+        const title = qrTitleText.value.trim() || 'ÜRGÜP MEYDANI';
+        const subtitle = qrSubText.value.trim() || 'Kameranızı Doğrultun';
+        const base = qrHostUrl.value.trim() || defaultHost;
+
+        currentQRResult = await adminStudio.generateQRCode({
+          url: base,
+          sculptureId: targetId,
+          colorDark: color,
+          title: title,
+          subtitle: subtitle,
+          size: 512
+        });
+
+        qrPreviewImg.src = currentQRResult.dataUrl;
+        qrUrlDisplay.textContent = currentQRResult.targetUrl;
+      }
+
+      [qrTargetType, qrHostUrl, qrTitleText, qrSubText, qrColorTheme].forEach(el => {
+        el.addEventListener('change', refreshQR);
+        el.addEventListener('input', refreshQR);
+      });
+
+      btnDownloadQR.addEventListener('click', () => {
+        if (currentQRResult && currentQRResult.download) {
+          const name = `urgup-meydan-qr-${qrTargetType.value}.png`;
+          currentQRResult.download(name);
+          showToast('QR Kod indirildi.');
+        }
+      });
+
+      // Tabela Yazdırma
+      btnPrintQR.addEventListener('click', () => {
+        if (!currentQRResult) return;
+        const printWindow = window.open('', '_blank');
+        printWindow.document.write(`
+          <html>
+            <head>
+              <title>Ürgüp Meydanı Tabela Çıktısı</title>
+              <style>
+                body { font-family: sans-serif; text-align: center; padding: 40px; margin: 0; }
+                .card { border: 4px solid #b45309; padding: 40px; max-width: 500px; margin: 0 auto; border-radius: 20px; }
+                h1 { margin-bottom: 10px; font-size: 24px; color: #0f172a; }
+                h3 { color: #b45309; margin-top: 0; font-size: 16px; }
+                img { max-width: 320px; margin: 20px 0; }
+                p { color: #64748b; font-size: 14px; }
+              </style>
+            </head>
+            <body>
+              <div class="card">
+                <h1>${qrTitleText.value}</h1>
+                <h3>AÇIK HAVA DİJİTAL HEYKEL SUNUMU</h3>
+                <img src="${currentQRResult.dataUrl}" />
+                <p>Telefonunuzun kamerasıyla QR kodu okutarak artırılmış gerçeklik (AR) heykellerini meydanda deneyimleyebilirsiniz.</p>
+              </div>
+              <script>
+                window.onload = function() { window.print(); }
+              <\/script>
+            </body>
+          </html>
+        `);
+        printWindow.document.close();
+      });
+
+      // İlk QR kodunu oluştur
+      refreshQR();
+    });
+  </script>
+</body>
+</html>

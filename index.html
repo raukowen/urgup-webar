@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#090d16">
+  <title>Ürgüp Meydanı Açık Hava Dijital Heykel Sunumu | WebAR</title>
+  
+  <!-- CSS Stilleri -->
+  <link rel="stylesheet" href="assets/css/style.css">
+  
+  <!-- Three.js ve Eklentileri (CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  
+  <!-- WebAR Modülleri -->
+  <script src="assets/js/qrcode-generator.js"></script>
+  <script src="assets/js/sculpture-library.js"></script>
+  <script src="assets/js/capture-engine.js"></script>
+  <script src="assets/js/audio-guide.js"></script>
+  <script src="assets/js/webar-engine.js"></script>
+</head>
+<body>
+
+  <!-- Canlı Kamera Video Arka Planı -->
+  <video id="camera-video" playsinline autoplay muted></video>
+
+  <!-- Canlı Kayıt Sayacı -->
+  <div id="record-timer" class="record-timer">
+    <span class="pulsing-dot" style="background-color: #fff;"></span>
+    <span id="record-timer-text">00:00</span>
+  </div>
+
+  <!-- Arayüz Katmanı (UI Container) -->
+  <div id="ui-container">
+    
+    <!-- Üst Bar (Header Bar) -->
+    <header class="top-bar interactive">
+      <div class="brand-badge">
+        <div class="brand-logo-icon">XR</div>
+        <div>
+          <h1 class="brand-title">ÜRGÜP MEYDANI</h1>
+          <p class="brand-sub">Açık Hava Dijital Heykel Sergisi</p>
+        </div>
+      </div>
+
+      <div class="top-actions">
+        <!-- Atmosfer Butonu -->
+        <button id="btn-atmosphere" class="icon-btn" title="Işık ve Atmosfer">
+          <span id="atmosphere-icon">☀️</span>
+        </button>
+
+        <!-- Dil Değiştirici -->
+        <button id="btn-lang" class="icon-btn" title="Language">
+          <span>TR</span>
+        </button>
+
+        <!-- Host Yönetici Paneli Linki -->
+        <a href="admin.html" class="icon-btn gold-highlight" title="Host Stüdyosu">
+          <span>⚙️ Host</span>
+        </a>
+      </div>
+    </header>
+
+    <!-- Orta Kılavuz (Reticle İpucu) -->
+    <div id="reticle-guide" class="reticle-guide interactive">
+      <span class="pulsing-dot"></span>
+      <span id="reticle-guide-text">Telefonunuzu meydana doğrultun ve ekrana dokunun</span>
+    </div>
+
+    <!-- Alt Kontrol Güvertesi (Bottom Deck) -->
+    <footer class="bottom-deck interactive">
+      
+      <!-- Heykel Bilgi Kartı -->
+      <div class="sculpture-card">
+        <div class="sculpture-info">
+          <h2 id="card-sculpture-title" class="sculpture-name">Ürgüp Kimerası</h2>
+          <div class="sculpture-meta">
+            <span id="card-sculpture-artist" class="artist">Ra & Bilgesu Studio</span> • 
+            <span id="card-sculpture-cat">Melez Biyo-Fosil</span>
+          </div>
+        </div>
+
+        <div class="card-actions">
+          <!-- Sesli Rehber Dinle Butonu -->
+          <button id="btn-audio" class="icon-btn gold-highlight" title="Sesli Anlatım">
+            <span id="audio-btn-icon">🔊</span>
+            <span id="audio-btn-text">Dinle</span>
+          </button>
+          
+          <!-- Detaylı Hikaye Butonu -->
+          <button id="btn-story" class="icon-btn" title="Eser Hikayesi">
+            <span>ℹ️ Bilgi</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Çekim ve Yerleştirme Butonları (Shutter Bar) -->
+      <div class="shutter-bar">
+        <!-- Fotoğraf Çek -->
+        <button id="btn-take-photo" class="btn-photo" title="Fotoğraf Çek">
+          <div class="btn-photo-inner">📸</div>
+        </button>
+
+        <!-- Ana Yerleştir Butonu -->
+        <button id="btn-place-sculpture" class="btn-place">
+          <span>📍</span>
+          <span id="btn-place-text">Meydana Yerleştir</span>
+        </button>
+
+        <!-- Video Kaydı Yap -->
+        <button id="btn-record-video" class="btn-record" title="Video Kaydı Yap">
+          <div class="btn-record-inner"></div>
+        </button>
+      </div>
+
+      <!-- Heykeller Yatay Menüsü (Carousel) -->
+      <div id="sculpture-carousel" class="sculpture-carousel">
+        <!-- Dinamik olarak JS ile doldurulacak -->
+      </div>
+    </footer>
+  </div>
+
+  <!-- ==========================================================================
+       MODAL PENCERELER
+       ========================================================================== -->
+
+  <!-- 1. Karşılama ve Kamera İzni Modalı -->
+  <div id="welcome-modal" class="modal-overlay active">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span>🏛️</span>
+          <span id="welcome-modal-title">Ürgüp Meydanı Dijital Heykel Sunumu</span>
+        </div>
+      </div>
+      <div class="modal-body">
+        <p id="welcome-p1">
+          Hoş geldiniz! Ürgüp Meydanı'ndaki açık hava dijital heykel sergisini deneyimlemek üzeresiniz.
+        </p>
+        <p id="welcome-p2">
+          Uygulama herhangi bir yükleme gerektirmeden doğrudan tarayıcınız üzerinden çalışır. Heykelleri meydana yerleştirmek ve fotoğraf/video çekebilmek için lütfen kamera erişimine izin verin.
+        </p>
+        <div style="background: rgba(245, 158, 11, 0.1); border-left: 3px solid var(--primary-gold); padding: 10px; border-radius: 4px; font-size: 13px; margin: 12px 0;">
+          💡 <strong>İpucu:</strong> Heykeli 1 parmakla döndürebilir, 2 parmakla kıstırarak anıtsal boyuta kadar büyütebilirsiniz!
+        </div>
+      </div>
+      <button id="btn-start-experience" class="primary-btn">
+        <span>🚀 Deneyimi Başlat & Kamerayı Aç</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- 2. Eser Hikayesi Modalı -->
+  <div id="story-modal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span id="story-modal-icon">📜</span>
+          <span id="story-modal-title">Eser Detayı</span>
+        </div>
+        <button id="btn-close-story" class="modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p><strong id="story-artist-label">Sanatçı:</strong> <span id="story-artist"></span></p>
+        <p><strong id="story-cat-label">Kategori / Malzeme:</strong> <span id="story-category"></span></p>
+        <hr style="border: none; border-top: 1px solid var(--border-glass); margin: 12px 0;">
+        <p id="story-description" style="color: #fff; line-height: 1.7;"></p>
+      </div>
+      <div style="display: flex; gap: 10px;">
+        <button id="btn-modal-audio" class="primary-btn" style="flex: 1;">
+          <span>🔊 Sesli Dinle</span>
+        </button>
+        <button id="btn-modal-close" class="secondary-btn" style="flex: 1;">
+          <span>Kapat</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Medya Çekim Önizleme Modalı (Fotoğraf & Video İndir/Paylaş) -->
+  <div id="capture-modal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span id="capture-modal-icon">📸</span>
+          <span id="capture-modal-title">Çekim Başarılı!</span>
+        </div>
+        <button id="btn-close-capture" class="modal-close">✕</button>
+      </div>
+      <div class="modal-body" style="text-align: center;">
+        <img id="capture-preview-img" style="display: none;" alt="AR Heykel Fotoğrafı">
+        <video id="capture-preview-video" style="display: none;" controls playsinline></video>
+        <p id="capture-success-note" style="margin-top: 12px; font-size: 13px;">
+          Fotoğrafınız Ürgüp Meydanı filigranı ve heykel bilgisiyle hazırlandı.
+        </p>
+      </div>
+      <div style="display: flex; gap: 10px;">
+        <button id="btn-download-capture" class="primary-btn" style="flex: 1;">
+          <span>💾 Cihaza İndir</span>
+        </button>
+        <button id="btn-share-capture" class="secondary-btn" style="flex: 1;">
+          <span>📤 Paylaş</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Bildirimi -->
+  <div id="toast" class="toast-msg"></div>
+
+  <!-- ==========================================================================
+       ANA ÇALIŞTIRICI SCRIPT (APP CONTROLLER)
+       ========================================================================== -->
+  <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+      // 1. Modülleri Başlat
+      const sculptureLib = new SculptureLibrary();
+      
+      // Kaydedilmiş özel modeller varsa yükle
+      const saved = localStorage.getItem('urgup_custom_sculptures');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          parsed.forEach(item => sculptureLib.addCustomModel(item));
+        } catch (e) {}
+      }
+
+      const videoElement = document.getElementById('camera-video');
+      let webarEngine = null;
+      let captureEngine = null;
+      const audioGuide = new AudioGuideEngine();
+
+      // Durum değişkenleri
+      let currentLanguage = 'tr'; // 'tr' | 'en'
+      let atmosphereIndex = 0;
+      const atmospheres = ['daylight', 'sunset', 'night'];
+      const atmosphereIcons = { daylight: '☀️', sunset: '🌅', night: '🌙' };
+      let activeSculpture = sculptureLib.getAll()[0];
+      let lastCaptureResult = null;
+
+      // URL Query Parametresi Kontrolü (örn: ?sculpture=steed)
+      const urlParams = new URLSearchParams(window.location.search);
+      const paramSculptureId = urlParams.get('sculpture');
+      if (paramSculptureId) {
+        const found = sculptureLib.getById(paramSculptureId);
+        if (found) activeSculpture = found;
+      }
+
+      // UI Elementleri
+      const welcomeModal = document.getElementById('welcome-modal');
+      const btnStart = document.getElementById('btn-start-experience');
+      const btnPlace = document.getElementById('btn-place-sculpture');
+      const btnPlaceText = document.getElementById('btn-place-text');
+      const btnPhoto = document.getElementById('btn-take-photo');
+      const btnRecord = document.getElementById('btn-record-video');
+      const recordTimer = document.getElementById('record-timer');
+      const recordTimerText = document.getElementById('record-timer-text');
+      const btnAtmosphere = document.getElementById('btn-atmosphere');
+      const atmosphereIcon = document.getElementById('atmosphere-icon');
+      const btnLang = document.getElementById('btn-lang');
+      const btnAudio = document.getElementById('btn-audio');
+      const audioBtnText = document.getElementById('audio-btn-text');
+      const btnStory = document.getElementById('btn-story');
+      const storyModal = document.getElementById('story-modal');
+      const btnCloseStory = document.getElementById('btn-close-story');
+      const btnModalClose = document.getElementById('btn-modal-close');
+      const btnModalAudio = document.getElementById('btn-modal-audio');
+      const captureModal = document.getElementById('capture-modal');
+      const btnCloseCapture = document.getElementById('btn-close-capture');
+      const capturePreviewImg = document.getElementById('capture-preview-img');
+      const capturePreviewVideo = document.getElementById('capture-preview-video');
+      const btnDownloadCapture = document.getElementById('btn-download-capture');
+      const btnShareCapture = document.getElementById('btn-share-capture');
+      const carouselContainer = document.getElementById('sculpture-carousel');
+      const reticleGuide = document.getElementById('reticle-guide');
+      const reticleGuideText = document.getElementById('reticle-guide-text');
+      const toast = document.getElementById('toast');
+
+      function showToast(msg) {
+        toast.textContent = msg;
+        toast.classList.add('show');
+        setTimeout(() => toast.classList.remove('show'), 2800);
+      }
+
+      // 2. Deneyimi Başlat Butonu
+      btnStart.addEventListener('click', async () => {
+        welcomeModal.classList.remove('active');
+
+        // WebAR Motorunu Başlat
+        webarEngine = new WebAREngine({
+          videoElement: videoElement,
+          onReticleStatus: (hasGround) => {
+            if (!webarEngine.isPlaced) {
+              reticleGuide.style.display = 'flex';
+              reticleGuideText.textContent = currentLanguage === 'tr'
+                ? (hasGround ? '📍 Meydan algılandı! Butona dokunarak yerleştirin' : 'Meydan zeminini taramak için telefonu hareket ettirin')
+                : (hasGround ? '📍 Ground detected! Tap button to place' : 'Move phone to scan the square ground');
+            } else {
+              reticleGuide.style.display = 'none';
+            }
+          },
+          onSculpturePlaced: () => {
+            btnPlaceText.textContent = currentLanguage === 'tr' ? 'Yeniden Konumlandır' : 'Reposition';
+            showToast(currentLanguage === 'tr' ? '✨ Heykel Ürgüp Meydanı zeminine yerleştirildi!' : '✨ Sculpture placed in Urgup Square!');
+          }
+        });
+
+        // Kamerayı ve Jiroskop Sensörlerini Aç
+        const camOk = await webarEngine.startCamera();
+        await webarEngine.enableSensors();
+        if (!camOk) {
+          showToast(currentLanguage === 'tr' ? 'Kamera açılamadı, simülasyon modunda devam ediliyor' : 'Camera not available, running in simulation mode');
+        }
+
+        // Çekim Motorunu Başlat
+        captureEngine = new CaptureEngine(videoElement, webarEngine.renderer.domElement);
+
+        // İlk Heykeli Yükle
+        await loadSculptureToScene(activeSculpture);
+      });
+
+      // 3. Heykeli Yükleme Fonksiyonu
+      async function loadSculptureToScene(sculpture) {
+        activeSculpture = sculpture;
+        updateCardInfo();
+
+        if (webarEngine) {
+          await webarEngine.setSculpture(sculpture.createMesh(), sculpture);
+          // Eğer önceden yerleştirildiyse otomatik yerleşsin
+          if (webarEngine.isPlaced) {
+            webarEngine.placeSculpture();
+          }
+        }
+        updateCarouselActive();
+      }
+
+      // Kart Bilgilerini Güncelle
+      function updateCardInfo() {
+        const isEN = currentLanguage === 'en';
+        document.getElementById('card-sculpture-title').textContent = isEN ? (activeSculpture.nameEN || activeSculpture.name) : activeSculpture.name;
+        document.getElementById('card-sculpture-artist').textContent = activeSculpture.artist;
+        document.getElementById('card-sculpture-cat').textContent = activeSculpture.category;
+      }
+
+      // Carousel Öğelerini Doldur
+      function renderCarousel() {
+        carouselContainer.innerHTML = '';
+        const list = sculptureLib.getAll();
+        const icons = ['🧬', '🐎', '🌿', '💎', '🗿'];
+
+        list.forEach((item, index) => {
+          const chip = document.createElement('div');
+          chip.className = `carousel-item ${item.id === activeSculpture.id ? 'active' : ''}`;
+          chip.innerHTML = `
+            <span class="carousel-item-icon">${icons[index % icons.length]}</span>
+            <span class="carousel-item-title">${currentLanguage === 'en' ? (item.nameEN || item.name) : item.name}</span>
+          `;
+          chip.addEventListener('click', () => {
+            loadSculptureToScene(item);
+          });
+          carouselContainer.appendChild(chip);
+        });
+      }
+
+      function updateCarouselActive() {
+        const chips = carouselContainer.querySelectorAll('.carousel-item');
+        sculptureLib.getAll().forEach((item, idx) => {
+          if (chips[idx]) {
+            chips[idx].classList.toggle('active', item.id === activeSculpture.id);
+          }
+        });
+      }
+
+      renderCarousel();
+
+      // 4. Meydana Yerleştir Butonu
+      btnPlace.addEventListener('click', () => {
+        if (!webarEngine) return;
+        if (!webarEngine.isPlaced) {
+          webarEngine.placeSculpture();
+        } else {
+          webarEngine.resetPlacement();
+          btnPlaceText.textContent = currentLanguage === 'tr' ? 'Meydana Yerleştir' : 'Place in Square';
+          showToast(currentLanguage === 'tr' ? 'Yeni bir zemin noktası seçip yerleştirin' : 'Select a new spot and tap to place');
+        }
+      });
+
+      // 5. Fotoğraf Çek Butonu
+      btnPhoto.addEventListener('click', async () => {
+        if (!captureEngine) return;
+        showToast(currentLanguage === 'tr' ? '📸 Fotoğraf işleniyor...' : '📸 Processing photo...');
+
+        // Ekran flaşı efekti
+        const flash = document.createElement('div');
+        flash.style.position = 'fixed';
+        flash.style.inset = '0';
+        flash.style.backgroundColor = '#fff';
+        flash.style.zIndex = '999';
+        flash.style.opacity = '0.85';
+        flash.style.transition = 'opacity 0.4s ease';
+        document.body.appendChild(flash);
+        setTimeout(() => {
+          flash.style.opacity = '0';
+          setTimeout(() => document.body.removeChild(flash), 400);
+        }, 50);
+
+        try {
+          lastCaptureResult = await captureEngine.capturePhoto(activeSculpture);
+          capturePreviewVideo.style.display = 'none';
+          capturePreviewImg.style.display = 'block';
+          capturePreviewImg.src = lastCaptureResult.url;
+          document.getElementById('capture-modal-title').textContent = currentLanguage === 'tr' ? 'Fotoğraf Kaydedildi!' : 'Photo Saved!';
+          captureModal.classList.add('active');
+        } catch (e) {
+          console.error(e);
+          showToast('Fotoğraf çekilemedi');
+        }
+      });
+
+      // 6. Video Kayıt Butonu
+      btnRecord.addEventListener('click', async () => {
+        if (!captureEngine) return;
+
+        if (!captureEngine.isRecording) {
+          // Kaydı Başlat
+          btnRecord.classList.add('recording');
+          recordTimer.style.display = 'flex';
+          showToast(currentLanguage === 'tr' ? '🔴 Video kaydı başladı! Meydanda dolaşabilirsiniz.' : '🔴 Recording started! Walk around the statue.');
+
+          await captureEngine.startRecording(activeSculpture, (timeStr) => {
+            recordTimerText.textContent = timeStr;
+          });
+        } else {
+          // Kaydı Durdur
+          btnRecord.classList.remove('recording');
+          recordTimer.style.display = 'none';
+          showToast(currentLanguage === 'tr' ? '⏳ Video derleniyor...' : '⏳ Compiling video...');
+
+          lastCaptureResult = await captureEngine.stopRecording(activeSculpture);
+          if (lastCaptureResult) {
+            capturePreviewImg.style.display = 'none';
+            capturePreviewVideo.style.display = 'block';
+            capturePreviewVideo.src = lastCaptureResult.url;
+            document.getElementById('capture-modal-title').textContent = currentLanguage === 'tr' ? 'Video Hazır!' : 'Video Ready!';
+            captureModal.classList.add('active');
+          }
+        }
+      });
+
+      // İndir ve Paylaş Butonları
+      btnDownloadCapture.addEventListener('click', () => {
+        if (lastCaptureResult) {
+          captureEngine.downloadFile(lastCaptureResult.url, lastCaptureResult.filename);
+        }
+      });
+
+      btnShareCapture.addEventListener('click', async () => {
+        if (lastCaptureResult && navigator.share) {
+          try {
+            await navigator.share({
+              title: 'Ürgüp Meydanı AR',
+              text: `${activeSculpture.name} - Ürgüp Meydanı Dijital Heykel Sunumu`,
+              files: [new File([lastCaptureResult.blob], lastCaptureResult.filename, { type: lastCaptureResult.blob.type })]
+            });
+          } catch (e) {}
+        } else {
+          showToast(currentLanguage === 'tr' ? 'Dosya cihazınıza indirildi' : 'File downloaded to device');
+        }
+      });
+
+      btnCloseCapture.addEventListener('click', () => {
+        captureModal.classList.remove('active');
+        capturePreviewVideo.pause();
+      });
+
+      // 7. Atmosfer Işık Değiştirici
+      btnAtmosphere.addEventListener('click', () => {
+        atmosphereIndex = (atmosphereIndex + 1) % atmospheres.length;
+        const currentMode = atmospheres[atmosphereIndex];
+        atmosphereIcon.textContent = atmosphereIcons[currentMode];
+        if (webarEngine) {
+          webarEngine.setAtmosphere(currentMode);
+        }
+        const names = { daylight: 'Gündüz Işığı', sunset: 'Kapadokya Gün Batımı', night: 'Gece UV Işıma' };
+        showToast(names[currentMode]);
+      });
+
+      // 8. Dil Değiştirici (TR / EN)
+      btnLang.addEventListener('click', () => {
+        currentLanguage = currentLanguage === 'tr' ? 'en' : 'tr';
+        btnLang.querySelector('span').textContent = currentLanguage.toUpperCase();
+        audioGuide.setLanguage(currentLanguage);
+
+        // UI Metinlerini Güncelle
+        updateCardInfo();
+        renderCarousel();
+        btnPlaceText.textContent = currentLanguage === 'tr' ? (webarEngine && webarEngine.isPlaced ? 'Yeniden Konumlandır' : 'Meydana Yerleştir') : (webarEngine && webarEngine.isPlaced ? 'Reposition' : 'Place in Square');
+        showToast(currentLanguage === 'tr' ? 'Türkçe seçildi' : 'English selected');
+      });
+
+      // 9. Sesli Rehber
+      audioGuide.onStateChange = (playing) => {
+        audioBtnText.textContent = playing ? (currentLanguage === 'tr' ? 'Durdur' : 'Stop') : (currentLanguage === 'tr' ? 'Dinle' : 'Listen');
+      };
+
+      btnAudio.addEventListener('click', () => {
+        if (audioGuide.isPlaying) {
+          audioGuide.stop();
+        } else {
+          audioGuide.speak(activeSculpture);
+        }
+      });
+
+      // 10. Eser Hikaye Modalı
+      btnStory.addEventListener('click', () => {
+        const isEN = currentLanguage === 'en';
+        document.getElementById('story-modal-title').textContent = isEN ? (activeSculpture.nameEN || activeSculpture.name) : activeSculpture.name;
+        document.getElementById('story-artist').textContent = activeSculpture.artist;
+        document.getElementById('story-category').textContent = activeSculpture.category;
+        document.getElementById('story-description').textContent = isEN ? (activeSculpture.descriptionEN || activeSculpture.description) : activeSculpture.description;
+        storyModal.classList.add('active');
+      });
+
+      btnCloseStory.addEventListener('click', () => storyModal.classList.remove('active'));
+      btnModalClose.addEventListener('click', () => storyModal.classList.remove('active'));
+      btnModalAudio.addEventListener('click', () => {
+        storyModal.classList.remove('active');
+        audioGuide.speak(activeSculpture);
+      });
+    });
+  </script>
+</body>
+</html>
