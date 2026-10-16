@@ -1,73 +1,77 @@
 /**
- * Ürgüp Meydanı WebAR - Çekirdek AR & 3D Stüdyo Motoru (MyWebAR Tarzı)
- * Asla siyah ekranda kalmaz: Canlı kamera görüntüsü yüklenirken veya
- * izin verilmediğinde muazzam Kapadokya 3D Meydan Simülasyonu devrededir.
- * Kamera açıldığında gerçek dünya AR moduna pürüzsüz geçiş yapar.
+ * Ürgüp Meydanı WebAR - Dünya & Zemin Takip Motoru (MyWebAR / Point Cloud Tracking Tarzı)
+ * Video referansındaki gibi: Canlı kamera arka planı, jiroskop sensör eşlemesi (DeviceOrientation),
+ * şeffaf gölge düzlemi (Shadow Receiver) ve gerçek dünyada sabit kalan 3D heykel.
  */
 
 class WebAREngine {
   constructor(options = {}) {
     this.container = options.container || document.body;
     this.videoElement = options.videoElement;
-    this.onModeChange = options.onModeChange || null;
-    this.onReticleStatus = options.onReticleStatus || null;
+    this.onTrackingStatus = options.onTrackingStatus || null;
     this.onStatusMessage = options.onStatusMessage || null;
 
-    // Mod: 'studio' (3D Meydan İnceleme) veya 'camera' (Gerçek Dünya AR)
-    this.mode = 'studio'; 
-    this.isCameraActive = false;
-
-    // Three.js Bileşenleri
+    // Three.js Çekirdeği
     this.scene = null;
     this.camera = null;
+    this.cameraContainer = null; // Jiroskop oryantasyonu için taşıyıcı
     this.renderer = null;
     this.clock = new THREE.Clock();
 
     // Sahne Nesneleri
-    this.sculpturePivot = null; // Döndürme ve taşıma grubu
+    this.sculpturePivot = null;
     this.currentSculptureMesh = null;
     this.currentSculptureMetadata = null;
-    this.reticle = null;
     this.shadowPlane = null;
-    this.studioFloor = null;
+    this.reticle = null;
 
     // Işıklar
     this.ambientLight = null;
     this.dirLight = null;
-    this.spotLight = null;
+
+    // Jiroskop ve Sensör Değişkenleri
+    this.hasOrientation = false;
+    this.deviceOrientation = { alpha: 0, beta: 0, gamma: 0 };
+    this.screenOrientation = window.orientation || 0;
+    this.isTracking = false;
 
     // Dokunmatik ve Etkileşim
-    this.touchStartPos = new THREE.Vector2();
     this.touchStartDistance = 0;
-    this.isPointerDown = false;
-    this.prevPointerPos = new THREE.Vector2();
+    this.isTouchDown = false;
+    this.touchStartPos = new THREE.Vector2();
 
     this.initScene();
     this.initLighting();
-    this.initStudioEnvironment();
+    this.initShadowPlane();
     this.initReticle();
-    this.setupTouchControls();
+    this.setupEvents();
     this.startRenderLoop();
   }
 
-  // 1. Sahne ve Renderer Kurulumu
+  // 1. Üç Boyutlu Sahne ve Şeffaf Renderer Kurulumu
   initScene() {
     this.scene = new THREE.Scene();
+    // Sahne arka planı NULL olmalı ki arkadaki kamera videosu görünsün!
+    this.scene.background = null;
 
     const aspect = window.innerWidth / window.innerHeight;
-    this.camera = new THREE.PerspectiveCamera(50, aspect, 0.1, 100);
-    // Kamerayı heykele tam odakla
-    this.camera.position.set(0, 1.4, 3.2);
-    this.camera.lookAt(0, 0.9, 0);
+    this.camera = new THREE.PerspectiveCamera(60, aspect, 0.05, 100);
+
+    // Kamera Taşıyıcı Grubu (Jiroskop için standart Three.js yapısı)
+    this.cameraContainer = new THREE.Group();
+    this.cameraContainer.position.set(0, 1.4, 0); // Göz hizası
+    this.cameraContainer.add(this.camera);
+    this.scene.add(this.cameraContainer);
 
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
-      alpha: true,
+      alpha: true, // Şeffaf zemin
       preserveDrawingBuffer: true,
       powerPreference: 'high-performance'
     });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setClearColor(0x000000, 0); // Tam şeffaf
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -82,76 +86,51 @@ class WebAREngine {
     canvas.style.touchAction = 'none';
     this.container.appendChild(canvas);
 
-    // Heykel Taşıyıcı Pivot
+    // Heykel Taşıyıcı Pivot Grubu (Kameranın 2.2 metre önüne yerleştirilir)
     this.sculpturePivot = new THREE.Group();
-    this.sculpturePivot.position.set(0, 0, 0);
+    this.sculpturePivot.position.set(0, 0, -2.2);
     this.scene.add(this.sculpturePivot);
   }
 
-  // 2. Işıklandırma
+  // 2. Güneş Işığı ve Gölgeler
   initLighting() {
-    this.ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
+    this.ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
     this.scene.add(this.ambientLight);
 
-    // Güneş Işığı ve Yumuşak Gölgeler
-    this.dirLight = new THREE.DirectionalLight(0xfffbeb, 1.4);
-    this.dirLight.position.set(4, 9, 5);
+    this.dirLight = new THREE.DirectionalLight(0xfffbeb, 1.5);
+    this.dirLight.position.set(5, 12, 6);
     this.dirLight.castShadow = true;
     this.dirLight.shadow.mapSize.width = 1024;
     this.dirLight.shadow.mapSize.height = 1024;
+    this.dirLight.shadow.camera.near = 0.5;
+    this.dirLight.shadow.camera.far = 25;
+    this.dirLight.shadow.camera.left = -4;
+    this.dirLight.shadow.camera.right = 4;
+    this.dirLight.shadow.camera.top = 4;
+    this.dirLight.shadow.camera.bottom = -4;
     this.dirLight.shadow.bias = -0.001;
     this.scene.add(this.dirLight);
-
-    // Vurgu Spot Işığı
-    this.spotLight = new THREE.SpotLight(0x38bdf8, 0.6);
-    this.spotLight.position.set(-4, 6, -3);
-    this.scene.add(this.spotLight);
   }
 
-  // 3. Stüdyo & Meydan Simülasyon Zeminleri (Siyah Ekranı Engelleyen Çözüm)
-  initStudioEnvironment() {
-    this.studioFloor = new THREE.Group();
-
-    // Meydan Dairesel Kaidesi
-    const pedGeo = new THREE.CylinderGeometry(1.4, 1.6, 0.1, 48);
-    const pedMat = new THREE.MeshStandardMaterial({
-      color: 0x1e293b,
-      roughness: 0.85,
-      metalness: 0.1
-    });
-    const ped = new THREE.Mesh(pedGeo, pedMat);
-    ped.position.y = -0.05;
-    ped.receiveShadow = true;
-    this.studioFloor.add(ped);
-
-    // Meydan Parke Taşı Izgarası (Grid)
-    const grid = new THREE.GridHelper(10, 20, 0xf59e0b, 0x334155);
-    grid.position.y = 0.002;
-    this.studioFloor.add(grid);
-
-    this.scene.add(this.studioFloor);
-
-    // Kamera Modu İçin Görünmez Gölge Düzlemi
-    const shadowGeo = new THREE.PlaneGeometry(20, 20);
-    const shadowMat = new THREE.ShadowMaterial({ opacity: 0.45 });
+  // 3. Gerçek Dünya Gölge Düzlemi (Meydan zeminine heykelin gölgesini düşürür)
+  initShadowPlane() {
+    const shadowGeo = new THREE.PlaneGeometry(30, 30);
+    const shadowMat = new THREE.ShadowMaterial({ opacity: 0.42 });
     this.shadowPlane = new THREE.Mesh(shadowGeo, shadowMat);
     this.shadowPlane.rotation.x = -Math.PI / 2;
     this.shadowPlane.position.y = 0;
     this.shadowPlane.receiveShadow = true;
-    this.shadowPlane.visible = false;
     this.scene.add(this.shadowPlane);
   }
 
-  // 4. Hedefleme Halkası (Reticle)
+  // 4. Hedefleme Dairesi (Reticle)
   initReticle() {
     this.reticle = new THREE.Group();
 
-    const ringGeo = new THREE.RingGeometry(0.35, 0.38, 36);
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: 0xf59e0b,
-      side: THREE.DoubleSide
-    });
-    const ring = new THREE.Mesh(ringGeo, ringMat);
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.32, 0.36, 36),
+      new THREE.MeshBasicMaterial({ color: 0xf59e0b, side: THREE.DoubleSide })
+    );
     ring.rotation.x = -Math.PI / 2;
     this.reticle.add(ring);
 
@@ -162,29 +141,29 @@ class WebAREngine {
     dot.rotation.x = -Math.PI / 2;
     this.reticle.add(dot);
 
-    this.reticle.position.set(0, 0.01, 0);
-    this.reticle.visible = false;
+    this.reticle.position.set(0, 0.01, -2.2);
+    this.reticle.visible = true;
     this.scene.add(this.reticle);
   }
 
-  // 5. Kamera Başlatma (Güvenli & Çökmez)
+  // 5. Kamerayı Başlat (Safari iOS & Android Uyumlu)
   async startCamera() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      this.notifyStatus('Tarayıcınız kamera akışını desteklemiyor, 3D Stüdyo modunda devam ediliyor.');
+      this.notifyStatus('Tarayıcınız kamera akışını desteklemiyor.');
       return false;
     }
 
     try {
       if (this.videoElement) {
+        this.videoElement.autoplay = true;
+        this.videoElement.playsInline = true;
+        this.videoElement.muted = true;
         this.videoElement.setAttribute('autoplay', '');
-        this.videoElement.setAttribute('muted', '');
         this.videoElement.setAttribute('playsinline', '');
         this.videoElement.setAttribute('webkit-playsinline', '');
-        this.videoElement.muted = true;
-        this.videoElement.playsInline = true;
+        this.videoElement.setAttribute('muted', '');
       }
 
-      // Esnek constraints (Tüm telefonlarla uyumlu)
       const constraints = {
         video: {
           facingMode: { ideal: 'environment' },
@@ -206,41 +185,66 @@ class WebAREngine {
       });
 
       await this.videoElement.play();
-      this.isCameraActive = true;
-      this.setMode('camera');
+      this.isTracking = true;
+
+      // Kamera videosu ekranda görünür olsun
+      this.videoElement.style.opacity = '1';
+
+      if (this.onTrackingStatus) {
+        this.onTrackingStatus(true);
+      }
       return true;
 
     } catch (err) {
-      console.warn('Kamera açılamadı:', err);
-      this.notifyStatus('Kamera izni verilmedi. 3D Meydan Simülasyon modundasınız.');
-      this.setMode('studio');
-      return false;
+      console.warn('Arka kamera açılamadı, alternatif kamera deneniyor:', err);
+      try {
+        const stream2 = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        this.videoElement.srcObject = stream2;
+        await this.videoElement.play();
+        this.isTracking = true;
+        this.videoElement.style.opacity = '1';
+        if (this.onTrackingStatus) this.onTrackingStatus(true);
+        return true;
+      } catch (err2) {
+        console.error('Kamera erişimi reddedildi:', err2);
+        this.notifyStatus('Lütfen tarayıcı ayarlarından kamera iznini onaylayın.');
+        if (this.onTrackingStatus) this.onTrackingStatus(false);
+        return false;
+      }
     }
   }
 
-  // Kamera ve Stüdyo Modları Arasında Geçiş
-  setMode(targetMode) {
-    this.mode = targetMode;
-
-    if (this.mode === 'camera' && this.isCameraActive) {
-      // Kamera Modu: Stüdyo tabanını gizle, şeffaf gölgeyi aç
-      if (this.studioFloor) this.studioFloor.visible = false;
-      if (this.shadowPlane) this.shadowPlane.visible = true;
-      if (this.videoElement) this.videoElement.style.opacity = '1';
-      document.body.style.backgroundColor = 'transparent';
-    } else {
-      // 3D Stüdyo Modu: Görsel zemini aç, siyah ekranı engelle
-      this.mode = 'studio';
-      if (this.studioFloor) this.studioFloor.visible = true;
-      if (this.shadowPlane) this.shadowPlane.visible = false;
-      if (this.videoElement) this.videoElement.style.opacity = '0';
-      document.body.style.backgroundColor = '#090d16';
+  // 6. Jiroskop & Dünya Takibi İzni (iOS 13+ ve Android)
+  async enableSensors() {
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      try {
+        const permission = await DeviceOrientationEvent.requestPermission();
+        if (permission === 'granted') {
+          window.addEventListener('deviceorientation', (e) => this.onOrientationEvent(e), true);
+          this.hasOrientation = true;
+          return true;
+        }
+      } catch (e) {
+        console.warn('Jiroskop izni alınamadı:', e);
+      }
+    } else if ('ondeviceorientation' in window) {
+      window.addEventListener('deviceorientation', (e) => this.onOrientationEvent(e), true);
+      this.hasOrientation = true;
+      return true;
     }
-
-    if (this.onModeChange) this.onModeChange(this.mode);
+    return false;
   }
 
-  // Heykel Yükleme
+  onOrientationEvent(event) {
+    if (event.alpha !== null && event.beta !== null) {
+      this.hasOrientation = true;
+      this.deviceOrientation.alpha = event.alpha;
+      this.deviceOrientation.beta = event.beta;
+      this.deviceOrientation.gamma = event.gamma || 0;
+    }
+  }
+
+  // 7. Heykeli Yükle
   async setSculpture(sculptureMeshPromise, metadata = {}) {
     if (this.currentSculptureMesh) {
       this.sculpturePivot.remove(this.currentSculptureMesh);
@@ -253,75 +257,83 @@ class WebAREngine {
 
     const scale = metadata.defaultScale || 1.0;
     this.sculpturePivot.scale.set(scale, scale, scale);
-    this.sculpturePivot.position.set(0, metadata.yOffset || 0, 0);
+    this.sculpturePivot.position.y = metadata.yOffset || 0;
 
     this.sculpturePivot.add(this.currentSculptureMesh);
   }
 
-  // Heykeli Meydanda Döndür
+  // Heykeli Yeniden Konumlandır (Tap to place / Raycast)
+  placeAtCurrentView() {
+    if (!this.sculpturePivot) return;
+
+    // Kameranın baktığı yönde 2 metre önündeki zemin noktasına sabitle
+    const forward = new THREE.Vector3(0, 0, -2.2);
+    forward.applyQuaternion(this.camera.quaternion);
+    forward.y = 0; // Zeminde tut
+
+    this.sculpturePivot.position.set(
+      this.cameraContainer.position.x + forward.x,
+      0,
+      this.cameraContainer.position.z + forward.z
+    );
+
+    // Animasyonlu sıçrama
+    const targetScale = this.currentSculptureMetadata?.defaultScale || 1.0;
+    this.sculpturePivot.scale.set(0.1, 0.1, 0.1);
+    let s = 0.1;
+    const interval = setInterval(() => {
+      s += 0.15;
+      this.sculpturePivot.scale.setScalar(Math.min(s, targetScale));
+      if (s >= targetScale) clearInterval(interval);
+    }, 16);
+  }
+
+  // Heykel Boyutlandırma (Pinch)
+  scaleSculpture(factor) {
+    if (this.sculpturePivot) {
+      const cur = this.sculpturePivot.scale.x;
+      const next = THREE.MathUtils.clamp(cur * factor, 0.2, 5.0);
+      this.sculpturePivot.scale.set(next, next, next);
+    }
+  }
+
+  // Heykel Döndürme
   rotateSculpture(deltaY) {
     if (this.sculpturePivot) {
       this.sculpturePivot.rotation.y += deltaY;
     }
   }
 
-  // Heykeli Ölçekle (Pinch Zoom)
-  scaleSculpture(factor) {
-    if (this.sculpturePivot) {
-      const cur = this.sculpturePivot.scale.x;
-      const next = THREE.MathUtils.clamp(cur * factor, 0.25, 5.0);
-      this.sculpturePivot.scale.set(next, next, next);
-    }
-  }
-
-  // Konumu Sıfırla / Meydana Oturt
-  placeSculpture() {
-    if (this.sculpturePivot) {
-      this.sculpturePivot.position.set(0, 0, 0);
-      // Yerleşme efekti
-      const currentScale = this.sculpturePivot.scale.x;
-      this.sculpturePivot.scale.set(0.1, 0.1, 0.1);
-      let s = 0.1;
-      const interval = setInterval(() => {
-        s += 0.15;
-        this.sculpturePivot.scale.setScalar(Math.min(s, currentScale));
-        if (s >= currentScale) clearInterval(interval);
-      }, 16);
-    }
-  }
-
-  // Atmosfer
+  // Atmosfer Işığı
   setAtmosphere(mode) {
     if (mode === 'daylight') {
       this.ambientLight.color.setHex(0xffffff);
-      this.ambientLight.intensity = 0.85;
+      this.ambientLight.intensity = 0.9;
       this.dirLight.color.setHex(0xfffbeb);
-      this.dirLight.intensity = 1.4;
-      this.dirLight.position.set(4, 9, 5);
+      this.dirLight.intensity = 1.5;
+      this.dirLight.position.set(5, 12, 6);
     } else if (mode === 'sunset') {
-      // Kapadokya Kızıl Gün Batımı
       this.ambientLight.color.setHex(0xfb923c);
-      this.ambientLight.intensity = 0.65;
+      this.ambientLight.intensity = 0.7;
       this.dirLight.color.setHex(0xf97316);
       this.dirLight.intensity = 1.8;
-      this.dirLight.position.set(7, 3, 5);
+      this.dirLight.position.set(8, 4, 5);
     } else if (mode === 'night') {
-      // Gece UV Işıma
       this.ambientLight.color.setHex(0x1e1b4b);
       this.ambientLight.intensity = 0.45;
       this.dirLight.color.setHex(0x38bdf8);
       this.dirLight.intensity = 0.8;
-      this.dirLight.position.set(0, 7, -3);
+      this.dirLight.position.set(0, 8, -4);
     }
   }
 
-  // 6. Dokunmatik Kontroller (Tek Parmak Döndür, İki Parmak Ölçekle)
-  setupTouchControls() {
+  // 8. Dokunmatik Olaylar
+  setupEvents() {
     const canvas = this.renderer.domElement;
 
     canvas.addEventListener('touchstart', (e) => {
       if (e.touches.length === 1) {
-        this.isPointerDown = true;
+        this.isTouchDown = true;
         this.touchStartPos.set(e.touches[0].clientX, e.touches[0].clientY);
       } else if (e.touches.length === 2) {
         const dx = e.touches[0].clientX - e.touches[1].clientX;
@@ -331,28 +343,26 @@ class WebAREngine {
     }, { passive: true });
 
     canvas.addEventListener('touchmove', (e) => {
-      if (e.touches.length === 1 && this.isPointerDown) {
+      if (e.touches.length === 1 && this.isTouchDown) {
         const dx = e.touches[0].clientX - this.touchStartPos.x;
         this.rotateSculpture(dx * 0.012);
         this.touchStartPos.set(e.touches[0].clientX, e.touches[0].clientY);
-      } else if (e.touches.length === 2) {
+      } else if (e.touches.length === 2 && this.touchStartDistance > 0) {
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
         const dist = Math.hypot(dx, dy);
-        if (this.touchStartDistance > 0) {
-          const factor = dist / this.touchStartDistance;
-          this.scaleSculpture(factor);
-          this.touchStartDistance = dist;
-        }
+        const factor = dist / this.touchStartDistance;
+        this.scaleSculpture(factor);
+        this.touchStartDistance = dist;
       }
     }, { passive: true });
 
     canvas.addEventListener('touchend', () => {
-      this.isPointerDown = false;
+      this.isTouchDown = false;
       this.touchStartDistance = 0;
     });
 
-    // Masaüstü Fare Kontrolleri
+    // Masaüstü fare desteği
     let isMouseDown = false;
     let lastX = 0;
     canvas.addEventListener('mousedown', (e) => {
@@ -378,20 +388,42 @@ class WebAREngine {
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(window.innerWidth, window.innerHeight);
     });
+
+    window.addEventListener('orientationchange', () => {
+      this.screenOrientation = window.orientation || 0;
+    });
   }
 
   notifyStatus(msg) {
     if (this.onStatusMessage) this.onStatusMessage(msg);
   }
 
-  // 7. Render Döngüsü
+  // 9. Ana Render ve Jiroskop Takip Döngüsü
   startRenderLoop() {
+    const zee = new THREE.Vector3(0, 0, 1);
+    const euler = new THREE.Euler();
+    const q0 = new THREE.Quaternion();
+    const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)); // -PI/2 X ekseni
+
     const animate = () => {
       requestAnimationFrame(animate);
 
       const delta = this.clock.getDelta();
 
-      // Heykel animasyonu (biyo-nabız, mikro ışıma vb.)
+      // Jiroskop ile telefon hareketini 1:1 kamera açısına eşle
+      if (this.hasOrientation) {
+        const alpha = THREE.MathUtils.degToRad(this.deviceOrientation.alpha || 0);
+        const beta = THREE.MathUtils.degToRad(this.deviceOrientation.beta || 0);
+        const gamma = THREE.MathUtils.degToRad(this.deviceOrientation.gamma || 0);
+        const orient = THREE.MathUtils.degToRad(this.screenOrientation || 0);
+
+        euler.set(beta, alpha, -gamma, 'YXZ');
+        this.camera.quaternion.setFromEuler(euler);
+        this.camera.quaternion.multiply(q1);
+        this.camera.quaternion.multiply(q0.setFromAxisAngle(zee, -orient));
+      }
+
+      // Heykel animasyonları
       if (this.currentSculptureMesh && this.currentSculptureMesh.userData.animate) {
         this.currentSculptureMesh.userData.animate(delta);
       }
