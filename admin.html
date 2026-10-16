@@ -246,7 +246,9 @@
       }
 
       // Varsayılan Host URL'ini mevcut sayfanın index.html adresine ayarla
-      const defaultHost = window.location.href.replace('admin.html', 'index.html').split('?')[0];
+      const defaultHost = window.location.hostname.includes('github.io')
+        ? window.location.href.replace('admin.html', 'index.html').split('?')[0]
+        : 'https://raukowen.github.io/urgup-webar/';
       qrHostUrl.value = defaultHost;
 
       // Heykel Seçici Dropdown'u Doldur
