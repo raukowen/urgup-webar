@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <title>Ürgüp Meydanı - A4 Heykel Kaidesi ve QR Tabela</title>
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 15mm;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      background: #f1f5f9;
+      color: #0f172a;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .print-actions {
+      margin-bottom: 20px;
+      display: flex;
+      gap: 12px;
+    }
+    .btn {
+      background: #b45309;
+      color: #fff;
+      border: none;
+      padding: 12px 24px;
+      font-size: 15px;
+      font-weight: bold;
+      border-radius: 8px;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(180, 83, 9, 0.3);
+    }
+    .btn-secondary {
+      background: #334155;
+    }
+    .sheet {
+      background: #ffffff;
+      width: 210mm;
+      min-height: 297mm;
+      padding: 18mm;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      text-align: center;
+    }
+    .header h1 {
+      font-size: 24px;
+      font-weight: 900;
+      letter-spacing: 1px;
+      color: #0f172a;
+      text-transform: uppercase;
+    }
+    .header h2 {
+      font-size: 14px;
+      color: #b45309;
+      font-weight: 700;
+      margin-top: 4px;
+      letter-spacing: 0.5px;
+    }
+    .marker-box {
+      margin: 20px 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .marker-img {
+      width: 140mm;
+      height: 140mm;
+      border: 3px solid #000;
+      padding: 4px;
+      background: #fff;
+    }
+    .marker-caption {
+      margin-top: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #64748b;
+      letter-spacing: 1px;
+    }
+    .footer {
+      width: 100%;
+      border-top: 2px dashed #cbd5e1;
+      padding-top: 14mm;
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+      text-align: left;
+    }
+    .instructions {
+      max-width: 100mm;
+      font-size: 13px;
+      line-height: 1.6;
+      color: #334155;
+    }
+    .instructions ol {
+      margin-left: 18px;
+      margin-top: 6px;
+    }
+    .qr-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+    .qr-img {
+      width: 36mm;
+      height: 36mm;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+    }
+    .qr-label {
+      font-size: 10px;
+      font-weight: bold;
+      color: #b45309;
+      margin-top: 4px;
+    }
+
+    @media print {
+      body {
+        background: transparent;
+        padding: 0;
+      }
+      .print-actions {
+        display: none !important;
+      }
+      .sheet {
+        box-shadow: none;
+        border-radius: 0;
+        width: 100%;
+        min-height: 100%;
+        padding: 10mm;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="print-actions">
+    <button class="btn" onclick="window.print()">🖨️ A4 Kağıdına Yazdır</button>
+    <a href="index.html" class="btn btn-secondary" style="text-decoration: none;">📱 AR Uygulamasına Dön</a>
+  </div>
+
+  <div class="sheet">
+    <div class="header">
+      <h1>ÜRGÜP MEYDANI</h1>
+      <h2>AÇIK HAVA DİJİTAL HEYKEL SUNUMU // AR KAİDESİ</h2>
+    </div>
+
+    <div class="marker-box">
+      <!-- Hiro Marker (A4'ün ortasına oturan 6-DOF takip işareti) -->
+      <img src="assets/images/marker_a4.png" alt="AR Kaide İşareti" class="marker-img">
+      <p class="marker-caption">▼ HEYKEL TAM BU KAİDENİN ÜZERİNE YERLEŞECEKTİR ▼</p>
+    </div>
+
+    <div class="footer">
+      <div class="instructions">
+        <strong>📱 Turist & Ziyaretçi Kullanım Kılavuzu:</strong>
+        <ol>
+          <li>Yandaki QR kodu telefonunuzun kamerasıyla okutun.</li>
+          <li>Açılan ekranda <strong>"AR DENEYİMİNİ BAŞLAT"</strong> butonuna dokunun.</li>
+          <li>Kameranızı yukarıdaki siyah çerçeveli kaide işaretine doğrulttuğunuzda 3D dijital heykel tam üzerine kilitlenerek yükselecektir!</li>
+        </ol>
+      </div>
+
+      <div class="qr-container">
+        <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=https%3A%2F%2Fraukowen.github.io%2Furgup-webar%2F&color=0f172a&bgcolor=ffffff&margin=5" alt="Uygulama QR Kodu" class="qr-img">
+        <span class="qr-label">1. QR'I OKUT</span>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>
