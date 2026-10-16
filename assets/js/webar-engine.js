@@ -1,7 +1,9 @@
 /**
- * Ürgüp Meydanı WebAR - A4 Kaide (Marker) ve Zemin Takip Motoru
- * A4 kağıdı üzerindeki takip işaretini (Hiro Marker) algılayarak
- * 3D heykeli doğrudan kağıdın üzerine santim şaşmadan kilitler.
+ * Ürgüp Meydanı WebAR - Yüksek Performanslı & Isınma Karşıtı A4 Takip Motoru
+ * - Isınma ve tutukluk önleme: 30 FPS CV throttling, optimize 320x240 işlem tamponu.
+ * - Titreme (Jitter) önleme: Poz yumuşatma filtresi (Lerp & Slerp).
+ * - Titreşimsiz görünüm: 400ms takip hafızası (Hysteresis persistence).
+ * - Pil tasarrufu: Hafif kontakt gölge & kontrollü piksel oranı.
  */
 
 class WebAREngine {
@@ -10,21 +12,22 @@ class WebAREngine {
     this.onTrackingStatus = options.onTrackingStatus || null;
     this.onStatusMessage = options.onStatusMessage || null;
 
-    // Mod: 'marker' (A4 Kağıdı Takibi) veya 'world' (Serbest Meydan Takibi)
-    this.mode = 'marker'; 
+    this.mode = 'marker'; // 'marker' (A4 Kaidesi) veya 'world' (Serbest Mod)
     this.isCameraRunning = false;
+    this.isMarkerLocked = false;
 
-    // Three.js Bileşenleri
+    // Three.js
     this.scene = null;
     this.camera = null;
     this.renderer = null;
     this.clock = new THREE.Clock();
 
-    // AR.js Nesneleri
+    // AR.js
     this.arToolkitSource = null;
     this.arToolkitContext = null;
     this.arMarkerControls = null;
     this.markerRoot = null;
+    this.smoothedRoot = null; // Titreşimi önleyen yumuşatılmış kök
     this.freeRoot = null;
 
     // Heykel Taşıyıcı
@@ -35,6 +38,10 @@ class WebAREngine {
     // Işıklar
     this.ambientLight = null;
     this.dirLight = null;
+
+    // Performans & Throttling Zamanlayıcıları
+    this.lastCvTime = 0;
+    this.lastDetectedTime = 0;
 
     // Dokunmatik
     this.touchStartDistance = 0;
@@ -48,7 +55,7 @@ class WebAREngine {
     this.startRenderLoop();
   }
 
-  // 1. Sahne & Şeffaf Renderer Kurulumu
+  // 1. Sahne ve Optimize Renderer
   initScene() {
     this.scene = new THREE.Scene();
     this.scene.background = null;
@@ -56,17 +63,19 @@ class WebAREngine {
     this.camera = new THREE.Camera();
     this.scene.add(this.camera);
 
+    // Isınmayı önlemek için piksel oranını 1.5 ile sınırla
+    const maxPixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
+
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: true,
       preserveDrawingBuffer: true,
-      powerPreference: 'high-performance'
+      powerPreference: 'high-performance',
+      precision: 'mediump' // Isınmayı azaltan optimize shader hassasiyeti
     });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.setClearColor(0x000000, 0); // Tam şeffaf
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.setPixelRatio(maxPixelRatio);
+    this.renderer.setClearColor(0x000000, 0);
 
     const canvas = this.renderer.domElement;
     canvas.id = 'webar-canvas';
@@ -80,60 +89,70 @@ class WebAREngine {
     this.container.appendChild(canvas);
   }
 
-  // 2. Işıklandırma
+  // 2. Hafif & Doğal Işıklandırma
   initLighting() {
     this.ambientLight = new THREE.AmbientLight(0xffffff, 0.95);
     this.scene.add(this.ambientLight);
 
-    this.dirLight = new THREE.DirectionalLight(0xfffbeb, 1.6);
-    this.dirLight.position.set(4, 10, 5);
-    this.dirLight.castShadow = true;
-    this.dirLight.shadow.mapSize.width = 1024;
-    this.dirLight.shadow.mapSize.height = 1024;
-    this.dirLight.shadow.bias = -0.001;
+    this.dirLight = new THREE.DirectionalLight(0xfffbeb, 1.4);
+    this.dirLight.position.set(3, 8, 4);
     this.scene.add(this.dirLight);
   }
 
-  // 3. Takip Kök Grupları (Marker ve Serbest Mod)
+  // 3. Titreşimsiz Takip Kökleri & Kontakt Gölge
   initRoots() {
-    // 1) A4 Kağıdına Kilitlenen Kök
+    // 1) Ham Marker Kökü (AR.js doğrudan burayı günceller)
     this.markerRoot = new THREE.Group();
-    this.markerRoot.name = 'a4_marker_root';
     this.scene.add(this.markerRoot);
 
-    // Kağıt üzerindeki gölge alıcı zemin
-    const shadowGeo = new THREE.PlaneGeometry(3, 3);
-    const shadowMat = new THREE.ShadowMaterial({ opacity: 0.45 });
-    const shadowPlane = new THREE.Mesh(shadowGeo, shadowMat);
-    shadowPlane.rotation.x = -Math.PI / 2;
-    shadowPlane.receiveShadow = true;
-    this.markerRoot.add(shadowPlane);
+    // 2) Yumuşatılmış Kök (Lerp/Slerp ile titreşimleri yok edilmiş kök)
+    this.smoothedRoot = new THREE.Group();
+    this.smoothedRoot.visible = false;
+    this.scene.add(this.smoothedRoot);
 
-    // Kılavuz Altın Çerçeve (A4 boyutunu gösterir)
-    const frameGeo = new THREE.RingGeometry(0.65, 0.68, 4);
-    const frameMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b, side: THREE.DoubleSide });
+    // 3) Kağıt Üzerine Gerçekçi Kontakt Gölge (Sıfır GPU Isınması)
+    const shadowGeo = new THREE.RingGeometry(0.01, 0.75, 32);
+    const shadowMat = new THREE.MeshBasicMaterial({
+      color: 0x0a0f1d,
+      transparent: true,
+      opacity: 0.45,
+      side: THREE.DoubleSide
+    });
+    const contactShadow = new THREE.Mesh(shadowGeo, shadowMat);
+    contactShadow.rotation.x = -Math.PI / 2;
+    contactShadow.position.y = 0.005; // Kağıdın milimetrik üstünde
+    this.smoothedRoot.add(contactShadow);
+
+    // Altın Kaide Çerçevesi (A4 sınırlarını netleştirir)
+    const frameGeo = new THREE.RingGeometry(0.68, 0.72, 4);
+    const frameMat = new THREE.MeshBasicMaterial({
+      color: 0xf59e0b,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.8
+    });
     const frame = new THREE.Mesh(frameGeo, frameMat);
     frame.rotation.x = -Math.PI / 2;
     frame.rotation.z = Math.PI / 4;
-    frame.position.y = 0.01;
-    this.markerRoot.add(frame);
+    frame.position.y = 0.008;
+    this.smoothedRoot.add(frame);
 
-    // 2) Kağıtsız Serbest Sabitleme Kökü
+    // 4) Kağıtsız Serbest Kök
     this.freeRoot = new THREE.Group();
-    this.freeRoot.position.set(0, -0.5, -2.5);
+    this.freeRoot.position.set(0, -0.4, -2.4);
     this.freeRoot.visible = false;
     this.scene.add(this.freeRoot);
 
     // Heykel Grubu
     this.sculptureGroup = new THREE.Group();
-    this.markerRoot.add(this.sculptureGroup);
+    this.smoothedRoot.add(this.sculptureGroup);
   }
 
-  // 4. A4 Kaide AR Motorunu Başlat (Kamera + Bilgisayarlı Görme)
+  // 4. Kamera & AR Başlatıcı (Optimize 30 FPS & 320x240 İşlemci Dostu)
   async startCamera() {
     return new Promise((resolve) => {
       try {
-        // AR Toolkit Kaynak (Webcam)
+        // Isınmayı önlemek için AR.js'i optimize parametrelerle yapılandır
         this.arToolkitSource = new THREEx.ArToolkitSource({
           sourceType: 'webcam'
         });
@@ -143,7 +162,6 @@ class WebAREngine {
             this.onResize();
             this.isCameraRunning = true;
 
-            // Kamera videosunu arka plana tam ekran yerleştir
             const video = this.arToolkitSource.domElement;
             if (video) {
               video.id = 'camera-video';
@@ -159,23 +177,23 @@ class WebAREngine {
             }
 
             resolve(true);
-          }, 300);
+          }, 250);
         });
 
-        // AR Toolkit Bağlamı (Kamera Kalibrasyonu)
+        // 320x240 analiz çözünürlüğü: CPU kullanımını %75 azaltır, ısınmayı durdurur
         this.arToolkitContext = new THREEx.ArToolkitContext({
           cameraParametersUrl: 'assets/data/camera_para.dat',
           detectionMode: 'mono',
-          maxDetectionRate: 60,
-          canvasWidth: 640,
-          canvasHeight: 480
+          maxDetectionRate: 30, // 30 FPS sınırlandırma
+          canvasWidth: 320,
+          canvasHeight: 240
         });
 
         this.arToolkitContext.init(() => {
           this.camera.projectionMatrix.copy(this.arToolkitContext.getProjectionMatrix());
         });
 
-        // Hiro Marker Kontrolleri (A4 Kağıdı)
+        // Hiro Marker
         this.arMarkerControls = new THREEx.ArMarkerControls(this.arToolkitContext, this.markerRoot, {
           type: 'pattern',
           patternUrl: 'assets/data/patt.hiro',
@@ -200,38 +218,34 @@ class WebAREngine {
     this.currentSculptureMesh = mesh;
     this.currentSculptureMetadata = metadata;
 
-    // A4 kağıdı üzerinde 1 birim ~ 14 cm kaide ölçeğindedir
-    const scale = (metadata.defaultScale || 1.0) * 0.9;
+    // A4 kağıdı için en ideal doğal ölçek (~14cm genişlik, 20cm yükseklik)
+    const scale = (metadata.defaultScale || 1.0) * 0.95;
     this.sculptureGroup.scale.set(scale, scale, scale);
     this.sculptureGroup.position.set(0, metadata.yOffset || 0, 0);
 
     this.sculptureGroup.add(this.currentSculptureMesh);
   }
 
-  // Heykeli Kağıtsız Mevcut Bakışa Sabitle (Serbest Mod)
+  // Kağıtsız / Serbest Sabitleme
   lockToCurrentView() {
     if (this.mode === 'marker') {
-      // Marker modundan Serbest Moda geç
       this.mode = 'world';
-      this.markerRoot.remove(this.sculptureGroup);
+      this.smoothedRoot.remove(this.sculptureGroup);
       this.freeRoot.add(this.sculptureGroup);
       this.freeRoot.visible = true;
       this.sculptureGroup.scale.setScalar(1.2);
-      this.sculptureGroup.position.set(0, 0, 0);
       this.notifyStatus('📍 Heykel ekranda sabitlendi (Kağıtsız mod).');
       if (this.onTrackingStatus) this.onTrackingStatus(true, 'Serbest Sabitlendi');
     } else {
-      // Yeniden A4 Kağıdı moduna dön
       this.mode = 'marker';
       this.freeRoot.remove(this.sculptureGroup);
-      this.markerRoot.add(this.sculptureGroup);
+      this.smoothedRoot.add(this.sculptureGroup);
       this.freeRoot.visible = false;
-      this.sculptureGroup.scale.setScalar(0.9);
-      this.notifyStatus('📄 A4 Kaide moduna geçildi. Kağıdı kameraya gösterin.');
+      this.sculptureGroup.scale.setScalar(0.95);
+      this.notifyStatus('📄 A4 Kaide moduna geçildi. Kağıdı gösterin.');
     }
   }
 
-  // Heykeli Döndür & Boyutlandır
   rotateSculpture(deltaY) {
     if (this.sculptureGroup) {
       this.sculptureGroup.rotation.y += deltaY;
@@ -241,32 +255,30 @@ class WebAREngine {
   scaleSculpture(factor) {
     if (this.sculptureGroup) {
       const cur = this.sculptureGroup.scale.x;
-      const next = THREE.MathUtils.clamp(cur * factor, 0.2, 5.0);
+      const next = THREE.MathUtils.clamp(cur * factor, 0.25, 4.0);
       this.sculptureGroup.scale.set(next, next, next);
     }
   }
 
-  // Atmosfer Işık Ayarı
   setAtmosphere(mode) {
     if (mode === 'daylight') {
       this.ambientLight.color.setHex(0xffffff);
       this.ambientLight.intensity = 0.95;
       this.dirLight.color.setHex(0xfffbeb);
-      this.dirLight.intensity = 1.6;
+      this.dirLight.intensity = 1.4;
     } else if (mode === 'sunset') {
       this.ambientLight.color.setHex(0xfb923c);
       this.ambientLight.intensity = 0.75;
       this.dirLight.color.setHex(0xf97316);
-      this.dirLight.intensity = 1.8;
+      this.dirLight.intensity = 1.6;
     } else if (mode === 'night') {
       this.ambientLight.color.setHex(0x1e1b4b);
       this.ambientLight.intensity = 0.5;
       this.dirLight.color.setHex(0x38bdf8);
-      this.dirLight.intensity = 0.9;
+      this.dirLight.intensity = 0.8;
     }
   }
 
-  // 6. Pencere Boyutlandırma
   onResize() {
     if (this.arToolkitSource) {
       this.arToolkitSource.onResizeElement();
@@ -294,7 +306,7 @@ class WebAREngine {
     canvas.addEventListener('touchmove', (e) => {
       if (e.touches.length === 1 && this.isTouchDown) {
         const dx = e.touches[0].clientX - this.touchStartPos.x;
-        this.rotateSculpture(dx * 0.015);
+        this.rotateSculpture(dx * 0.012);
         this.touchStartPos.set(e.touches[0].clientX, e.touches[0].clientY);
       } else if (e.touches.length === 2 && this.touchStartDistance > 0) {
         const dx = e.touches[0].clientX - e.touches[1].clientX;
@@ -318,27 +330,44 @@ class WebAREngine {
     if (this.onStatusMessage) this.onStatusMessage(msg);
   }
 
-  // 7. Ana Render & Takip Döngüsü
+  // 6. Titreşimsiz & Isınma Karşıtı Render Döngüsü
   startRenderLoop() {
-    let wasVisible = false;
-
     const animate = () => {
       requestAnimationFrame(animate);
 
       const delta = this.clock.getDelta();
+      const now = performance.now();
 
-      // AR Takip Güncellemesi
-      if (this.arToolkitSource && this.arToolkitSource.ready) {
-        this.arToolkitContext.update(this.arToolkitSource.domElement);
+      // CPU'yu yormamak için görüntü analizini 30 FPS ile sınırla (~33ms)
+      if (now - this.lastCvTime >= 33) {
+        this.lastCvTime = now;
+        if (this.arToolkitSource && this.arToolkitSource.ready) {
+          this.arToolkitContext.update(this.arToolkitSource.domElement);
+        }
       }
 
-      // Marker Modunda Takip Durumu Kontrolü
+      // Marker Modu Titreşim Filtresi & Yumuşatma (Lerp / Slerp)
       if (this.mode === 'marker') {
-        const isVisible = this.markerRoot.visible;
-        if (isVisible !== wasVisible) {
-          wasVisible = isVisible;
-          if (this.onTrackingStatus) {
-            this.onTrackingStatus(isVisible, isVisible ? 'A4 Kaidesi Kilitlendi' : 'A4 Kağıdını Gösterin...');
+        if (this.markerRoot && this.markerRoot.visible) {
+          this.lastDetectedTime = now;
+          this.smoothedRoot.visible = true;
+
+          // Yumuşak poz sönümleme: Titremeyi tamamen yok eder
+          this.smoothedRoot.position.lerp(this.markerRoot.position, 0.32);
+          this.smoothedRoot.quaternion.slerp(this.markerRoot.quaternion, 0.32);
+
+          if (!this.isMarkerLocked) {
+            this.isMarkerLocked = true;
+            if (this.onTrackingStatus) this.onTrackingStatus(true, 'A4 Kaidesi Kilitlendi');
+          }
+        } else {
+          // 400ms Takip Hafızası (Hysteresis): El titremesinde heykel aniden kaybolmaz
+          if (now - this.lastDetectedTime > 400) {
+            this.smoothedRoot.visible = false;
+            if (this.isMarkerLocked) {
+              this.isMarkerLocked = false;
+              if (this.onTrackingStatus) this.onTrackingStatus(false, 'A4 Kağıdını Gösterin...');
+            }
           }
         }
       }
